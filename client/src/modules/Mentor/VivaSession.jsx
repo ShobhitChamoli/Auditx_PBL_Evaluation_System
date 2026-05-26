@@ -86,7 +86,18 @@ const VivaSession = ({ project, onComplete, onCancel }) => {
                         <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
                         Live Viva Session
                     </h2>
-                    <p className="text-sm text-slate-500">Evaluating: <span className="font-bold text-blue-600">{project.teamName}</span></p>
+                    <div className="text-sm text-slate-500 flex items-center gap-2 flex-wrap">
+                        Evaluating: <span className="font-bold text-blue-600">{project.teamName}</span>
+                        {project.pdfText ? (
+                            <Badge variant="success" className="text-[10px] py-0.5 px-2 bg-emerald-50 text-emerald-700 border-emerald-200">
+                                📄 PDF Context Active ({project.pdfText.length} chars)
+                            </Badge>
+                        ) : (
+                            <Badge variant="info" className="text-[10px] py-0.5 px-2 bg-slate-100 text-slate-600 border-slate-200">
+                                📄 General Context
+                            </Badge>
+                        )}
+                    </div>
                 </div>
                 <div className="flex items-center gap-4">
                     <div className="text-right mr-4">

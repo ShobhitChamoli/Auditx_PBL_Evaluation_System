@@ -2,7 +2,7 @@ const db = require('../data/firebaseDb');
 const { v4: uuidv4 } = require('uuid');
 
 const createProject = async (req, res) => {
-    const { teamName, leaderName, members, repoLink, title, description, domain, techStack, courseCode, subjectName, semester, academicYear } = req.body;
+    const { teamName, leaderName, members, repoLink, title, description, domain, techStack, courseCode, subjectName, semester, academicYear, pdfText } = req.body;
 
     if (!teamName || !leaderName || !repoLink || !title || !description || !domain || !techStack || !courseCode || !semester || !academicYear) {
         return res.status(400).json({ message: 'Please add all required fields' });
@@ -69,6 +69,7 @@ const createProject = async (req, res) => {
         subjectName: finalSubjectName, // Backend Truth
         semester,
         academicYear,
+        pdfText: pdfText || '',
         analyzed: false
     });
 
@@ -128,11 +129,44 @@ const getProjectById = async (req, res) => {
         return res.status(404).json({ message: 'Project not found' });
     }
     res.status(200).json(project);
-}
+};
+
+const updateProject = async (req, res) => {
+    const { id } = req.params;
+    const { pdfText, repoLink, description, techStack, members, title, teamName, domain } = req.body;
+
+    try {
+        const project = await db.findById('projects', id);
+        if (!project) {
+            return res.status(404).json({ message: 'Project not found' });
+        }
+
+        // Access Control: Only student owner or mentor or admin
+        if (project.studentId !== req.user.id && project.mentorId !== req.user.id && req.user.role !== 'admin') {
+            return res.status(403).json({ message: 'Not authorized to update this project' });
+        }
+
+        const updateData = {};
+        if (pdfText !== undefined) updateData.pdfText = pdfText;
+        if (repoLink !== undefined) updateData.repoLink = repoLink;
+        if (description !== undefined) updateData.description = description;
+        if (techStack !== undefined) updateData.techStack = techStack;
+        if (members !== undefined) updateData.members = members;
+        if (title !== undefined) updateData.title = title;
+        if (teamName !== undefined) updateData.teamName = teamName;
+        if (domain !== undefined) updateData.domain = domain;
+
+        const updated = await db.update('projects', id, updateData);
+        res.status(200).json(updated);
+    } catch (error) {
+        res.status(500).json({ message: 'Server error updating project', error: error.message });
+    }
+};
 
 module.exports = {
     createProject,
     getProjects,
     getMyProject,
-    getProjectById
+    getProjectById,
+    updateProject
 };

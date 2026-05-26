@@ -283,9 +283,6 @@ const generateMemberFallback = (techStack, member) => {
     return selected;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN CONTROLLER
-// ─────────────────────────────────────────────────────────────────────────────
 const generateViva = async (req, res) => {
     let stack = 'general';
     try {
@@ -297,6 +294,7 @@ const generateViva = async (req, res) => {
         let repoLink = bodyRepoLink;
 
         let teamMembers = [];
+        let pdfText = "";
 
         // Look up actual project from DB using projectId
         if (projectId) {
@@ -306,6 +304,7 @@ const generateViva = async (req, res) => {
                 stack = project.techStack || stack;
                 desc = project.description || desc;
                 repoLink = project.repoLink || repoLink;
+                pdfText = project.pdfText || "";
 
                 // Extract members
                 if (project.leaderName) {
@@ -327,7 +326,7 @@ const generateViva = async (req, res) => {
         stack = stack || "general";
         desc = desc || "A student's project";
 
-        // Fallback team members if none found, ensuring exactly 4 members to hit the 16 questions request if empty
+        // Fallback team members if none found
         if (teamMembers.length === 0) {
             teamMembers = [req.body.leaderName || "Leader", "Member 1", "Member 2", "Member 3"];
         }
@@ -348,6 +347,13 @@ const generateViva = async (req, res) => {
             }
         }
 
+        // Build PDF context if available
+        let pdfContext = "";
+        if (pdfText) {
+            pdfContext = `Project PDF Report/Synopsis Template Text:\n"""\n${pdfText.slice(0, 8000)}\n"""`;
+            console.log(`[Viva] Injecting PDF context (${pdfText.length} characters)`);
+        }
+
         const provider = (process.env.AI_PROVIDER || 'ollama').toLowerCase();
         let questions = [];
 
@@ -357,8 +363,10 @@ const generateViva = async (req, res) => {
 Project: "${title}"
 Tech Stack: ${stack}
 Team members: ${teamMembers.join(', ')}
+${pdfContext ? `Below is the project's PDF report/synopsis context:\n${pdfContext}\n` : ''}
+${repoContext ? `Below is some repository file summary context:\n${repoContext}\n` : ''}
 
-For each team member, generate exactly 4 technical viva questions about the declared tech stack:
+For each team member, generate exactly 4 technical viva questions about the declared tech stack, their repository files, and the details in their PDF report/synopsis template:
 - 1 Easy question
 - 2 Medium questions
 - 1 Hard question
@@ -382,7 +390,7 @@ Return ONLY the raw JSON array. No markdown, no explanation.`;
                 responseText = completion.choices[0].message.content;
             } else {
                 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-                const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+                const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
                 const result = await model.generateContent(prompt);
                 const response = await result.response;
                 responseText = response.text();
@@ -393,7 +401,6 @@ Return ONLY the raw JSON array. No markdown, no explanation.`;
 
         } else {
             // Default to Ollama.
-            // Loop through each member sequentially to generate 4 questions (1 Easy, 2 Medium, 1 Hard) per member
             const ollamaUrl = process.env.OLLAMA_API_URL || 'http://localhost:11434';
             const modelName = process.env.OLLAMA_MODEL || 'llama3.2';
 
@@ -402,20 +409,58 @@ Return ONLY the raw JSON array. No markdown, no explanation.`;
                     model: modelName,
                     prompt: promptText,
                     stream: false,
-                    options: { temperature: 0.7, num_predict: 1000 }
-                }, { timeout: 45000 });
+                    options: { temperature: 0.7, num_predict: 1500 }
+                }, { timeout: 60000 });
                 return r.data?.response || '';
             };
 
-            for (const member of teamMembers) {
-                console.log(`[Viva] Requesting 4 Ollama questions for: ${member}`);
-                const memberPrompt = `You are a technical viva examiner.
+            console.log(`[Viva] Requesting combined Ollama questions for: [${teamMembers.join(', ')}]`);
+            const combinedPrompt = `You are a technical viva examiner.
+Project: "${title}"
+Tech Stack: ${stack}
+Team members: ${teamMembers.join(', ')}
+${pdfContext ? `Below is the project's PDF report/synopsis context:\n${pdfContext}\n` : ''}
+${repoContext ? `Below is some repository file summary context:\n${repoContext}\n` : ''}
+
+Generate exactly 4 technical questions for each team member (names: ${teamMembers.join(', ')}) about their project, their repository, and the details in their PDF report/synopsis.
+Each member's 4 questions must have:
+- 1 Easy question
+- 2 Medium questions
+- 1 Hard question
+
+Return ONLY a valid JSON array of objects. Each object must have:
+"question" (string, under 20 words), "answer" (concise 1-2 sentences), "difficulty" ("Easy", "Medium", or "Hard"), "category" (technology name), "assignedTo" (name of the member)
+
+Return ONLY the raw JSON array. No markdown, no explanation.`;
+
+            try {
+                const responseText = await callOllama(combinedPrompt);
+                const parsed = extractJsonArray(responseText) || [];
+                if (parsed.length > 0) {
+                    questions = parsed.map(q => ({
+                        question: q.question || "Explain a key concept from your project.",
+                        answer: q.answer || "Listen for accuracy and understanding.",
+                        difficulty: q.difficulty || "Medium",
+                        category: q.category || stack,
+                        assignedTo: q.assignedTo || teamMembers[0]
+                    }));
+                    console.log(`[Viva] Combined Ollama generated questions:`, questions.length);
+                } else {
+                    throw new Error("Could not parse JSON array from Ollama");
+                }
+            } catch (err) {
+                console.warn(`[Viva] Combined Ollama generation failed, falling back to member loop:`, err.message);
+                
+                // Fallback: sequential calls for each member
+                for (const member of teamMembers) {
+                    console.log(`[Viva] Fallback requesting Ollama questions for: ${member}`);
+                    const memberPrompt = `You are a technical viva examiner.
 Student Name: ${member}
 Project: "${title}"
 Tech Stack: ${stack}
+${pdfContext ? `Below is the project's PDF report/synopsis context:\n${pdfContext}\n` : ''}
 
-Generate exactly 4 technical questions for ${member} ONLY about the declared tech stack: ${stack}.
-The 4 questions MUST have these difficulties:
+Generate exactly 4 technical questions for ${member} about their project and tech stack:
 - 1 Easy question
 - 2 Medium questions
 - 1 Hard question
@@ -425,26 +470,26 @@ Return ONLY a valid JSON array of exactly 4 objects. Each must have:
 
 Return ONLY the raw JSON array. No markdown, no explanation.`;
 
-                try {
-                    const responseText = await callOllama(memberPrompt);
-                    const parsed = extractJsonArray(responseText) || [];
-                    if (parsed.length > 0) {
-                        const validated = parsed.map(q => ({
-                            question: q.question || "Explain a key concept from your project.",
-                            answer: q.answer || "Listen for accuracy and understanding.",
-                            difficulty: q.difficulty || "Medium",
-                            category: q.category || stack,
-                            assignedTo: member
-                        }));
-                        questions.push(...validated);
-                    } else {
-                        throw new Error("Could not parse JSON array for member");
+                    try {
+                        const responseText = await callOllama(memberPrompt);
+                        const parsed = extractJsonArray(responseText) || [];
+                        if (parsed.length > 0) {
+                            const validated = parsed.map(q => ({
+                                question: q.question || "Explain a key concept from your project.",
+                                answer: q.answer || "Listen for accuracy and understanding.",
+                                difficulty: q.difficulty || "Medium",
+                                category: q.category || stack,
+                                assignedTo: member
+                            }));
+                            questions.push(...validated);
+                        } else {
+                            throw new Error("Could not parse JSON array");
+                        }
+                    } catch (memberErr) {
+                        console.warn(`[Viva] Fallback Ollama generation failed for ${member}:`, memberErr.message);
+                        const fallbacks = generateMemberFallback(stack, member);
+                        questions.push(...fallbacks);
                     }
-                } catch (err) {
-                    console.warn(`[Viva] Ollama generation failed for ${member}:`, err.message);
-                    // Use fallback generator for this member
-                    const fallbacks = generateMemberFallback(stack, member);
-                    questions.push(...fallbacks);
                 }
             }
         }
@@ -473,8 +518,8 @@ Return ONLY the raw JSON array. No markdown, no explanation.`;
         const { projectId } = req.body;
         let teamMembers = [req.body.leaderName || "Leader", "Member 1", "Member 2", "Member 3"];
 
-        if (projectId) {
-            try {
+        try {
+            if (projectId) {
                 const project = await db.findById('projects', projectId);
                 if (project) {
                     const list = [];
@@ -487,8 +532,8 @@ Return ONLY the raw JSON array. No markdown, no explanation.`;
                     }
                     if (list.length > 0) teamMembers = list;
                 }
-            } catch (e) {}
-        }
+            }
+        } catch (e) {}
 
         teamMembers.forEach(member => {
             fallbackQuestions.push(...generateMemberFallback(stack, member));

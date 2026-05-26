@@ -25,6 +25,79 @@ const StudentDashboard = () => {
     const [notifications, setNotifications] = useState([]);
     const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
     const [showSubmissionForm, setShowSubmissionForm] = useState(false); // For submitting additional projects
+    const [pdfParsing, setPdfParsing] = useState(false);
+    const [pdfParsed, setPdfParsed] = useState(false);
+
+    const extractTextFromPdf = (file) => {
+        return new Promise((resolve, reject) => {
+            const fileReader = new FileReader();
+            fileReader.onload = async (e) => {
+                try {
+                    const typedarray = new Uint8Array(e.target.result);
+                    const pdfjsLib = window.pdfjsLib;
+                    if (!pdfjsLib) {
+                        return reject(new Error("PDF parsing library (pdf.js) is not loaded yet. Please wait a moment or reload the page."));
+                    }
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                    
+                    const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
+                    let fullText = "";
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        const pageText = textContent.items.map(item => item.str).join(" ");
+                        fullText += pageText + "\n";
+                    }
+                    resolve(fullText);
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            fileReader.onerror = () => reject(new Error("File reading failed"));
+            fileReader.readAsArrayBuffer(file);
+        });
+    };
+
+    const handlePdfUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setPdfParsing(true);
+        try {
+            const text = await extractTextFromPdf(file);
+            setSubmission(prev => ({ ...prev, pdfText: text }));
+            setPdfParsed(true);
+            alert("PDF Synopsis parsed and synced successfully! ✅ Ready to submit.");
+        } catch (err) {
+            console.error(err);
+            alert("Failed to parse PDF: " + err.message);
+        } finally {
+            setPdfParsing(false);
+        }
+    };
+
+    const handleUpdatePdf = async (projectId, e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setPdfParsing(true);
+        try {
+            const text = await extractTextFromPdf(file);
+            const token = localStorage.getItem('token');
+            await axios.put(`/api/projects/${projectId}`, { pdfText: text }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            
+            // Update local state
+            setProjects(projects.map(p => p.id === projectId ? { ...p, pdfText: text } : p));
+            alert("PDF Synopsis updated successfully! ✅ Your mentor's AI viva is now synced with this template.");
+        } catch (err) {
+            console.error(err);
+            alert("Failed to update PDF: " + err.message);
+        } finally {
+            setPdfParsing(false);
+        }
+    };
 
     useEffect(() => {
         fetchProject();
@@ -290,6 +363,39 @@ const StudentDashboard = () => {
                                 <Input name="domain" label="Domain" placeholder="Web, AI, ML, Mobile..." onChange={handleChange} required />
                                 <Input name="techStack" label="Tech Stack" placeholder="React, Node.js, MongoDB..." onChange={handleChange} required />
                             </div>
+                            
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+                                <label className="block text-sm font-semibold text-slate-700 mb-2">Project Report / Synopsis (PDF) - Optional</label>
+                                <div className="flex items-center gap-4">
+                                    <input
+                                        type="file"
+                                        accept=".pdf"
+                                        onChange={handlePdfUpload}
+                                        className="hidden"
+                                        id="pdf-upload"
+                                        disabled={pdfParsing}
+                                    />
+                                    <label
+                                        htmlFor="pdf-upload"
+                                        className={`flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold cursor-pointer transition-colors hover:bg-slate-50 ${
+                                            pdfParsed ? 'text-emerald-600 border-emerald-300 bg-emerald-50/20' : 'text-slate-600'
+                                        }`}
+                                    >
+                                        <Upload size={14} />
+                                        {pdfParsing ? 'Parsing PDF...' : pdfParsed ? '✓ PDF Attached' : 'Choose PDF File'}
+                                    </label>
+                                    {pdfParsed && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { setSubmission(prev => ({ ...prev, pdfText: '' })); setPdfParsed(false); }}
+                                            className="text-xs text-red-500 hover:underline font-semibold"
+                                        >
+                                            Remove
+                                        </button>
+                                    )}
+                                </div>
+                                <p className="text-slate-400 text-[10px] mt-1">Extracts report details so the AI viva examiner generates questions specific to your synopsis template.</p>
+                            </div>
                             <Button type="submit" className="w-full flex items-center justify-center gap-2">
                                 <Upload size={18} />
                                 Submit Project
@@ -403,6 +509,39 @@ const StudentDashboard = () => {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <Input name="domain" label="Domain" placeholder="Web, AI, ML, Mobile..." onChange={handleChange} required />
                                     <Input name="techStack" label="Tech Stack" placeholder="React, Node.js, MongoDB..." onChange={handleChange} required />
+                                </div>
+
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+                                    <label className="block text-sm font-semibold text-slate-700 mb-2">Project Report / Synopsis (PDF) - Optional</label>
+                                    <div className="flex items-center gap-4">
+                                        <input
+                                            type="file"
+                                            accept=".pdf"
+                                            onChange={handlePdfUpload}
+                                            className="hidden"
+                                            id="pdf-upload-new"
+                                            disabled={pdfParsing}
+                                        />
+                                        <label
+                                            htmlFor="pdf-upload-new"
+                                            className={`flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold cursor-pointer transition-colors hover:bg-slate-50 ${
+                                                pdfParsed ? 'text-emerald-600 border-emerald-300 bg-emerald-50/20' : 'text-slate-600'
+                                            }`}
+                                        >
+                                            <Upload size={14} />
+                                            {pdfParsing ? 'Parsing PDF...' : pdfParsed ? '✓ PDF Attached' : 'Choose PDF File'}
+                                        </label>
+                                        {pdfParsed && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { setSubmission(prev => ({ ...prev, pdfText: '' })); setPdfParsed(false); }}
+                                                className="text-xs text-red-500 hover:underline font-semibold"
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-slate-400 text-[10px] mt-1">Extracts report details so the AI viva examiner generates questions specific to your synopsis template.</p>
                                 </div>
                                 <Button type="submit" className="w-full flex items-center justify-center gap-2">
                                     <Upload size={18} />
@@ -578,11 +717,63 @@ const StudentDashboard = () => {
                                 )}
                             </Card>
                         ) : (
-                            <Card hover={false} className="flex items-center justify-center slide-up">
-                                <div className="text-center py-12">
-                                    <Clock className="mx-auto mb-4 text-primary/50" size={64} />
-                                    <h3 className="text-2xl font-bold mb-2">Pending Evaluation</h3>
-                                    <p className="text-slate-500 max-w-sm mx-auto font-medium">Your mentor will review your project and conduct the viva session soon. You'll be notified once the evaluation is complete.</p>
+                            <Card hover={false} className="slide-up border-t-4 border-t-amber-500">
+                                <div className="text-center py-6">
+                                    <Clock className="mx-auto mb-4 text-amber-500" size={48} />
+                                    <h3 className="text-xl font-bold mb-2">Pending Evaluation</h3>
+                                    <p className="text-slate-500 max-w-sm mx-auto font-medium text-sm">Your mentor will review your project and conduct the viva session soon. You'll be notified once the evaluation is complete.</p>
+                                </div>
+                                <div className="border-t border-slate-100 pt-6 mt-2">
+                                    <h4 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                                        <Upload size={16} className="text-blue-500" /> Insert PDF Synopsis / Report for AI Viva
+                                    </h4>
+                                    <p className="text-slate-400 text-xs mb-4">
+                                        Upload your project synopsis or report PDF. The AI viva examiner will extract key details and generate questions directly from your template.
+                                    </p>
+                                    {project.pdfText ? (
+                                        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex justify-between items-center">
+                                            <div>
+                                                <div className="text-emerald-800 font-bold text-xs">✓ PDF Synopsis Attached</div>
+                                                <div className="text-emerald-600 text-[10px]">{project.pdfText.length} characters of synopsis context active.</div>
+                                            </div>
+                                            <div>
+                                                <input
+                                                    type="file"
+                                                    accept=".pdf"
+                                                    onChange={(e) => handleUpdatePdf(project.id, e)}
+                                                    className="hidden"
+                                                    id={`pdf-update-${project.id}`}
+                                                    disabled={pdfParsing}
+                                                />
+                                                <label
+                                                    htmlFor={`pdf-update-${project.id}`}
+                                                    className="text-xs bg-white text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg font-semibold hover:bg-emerald-100 transition-colors cursor-pointer"
+                                                >
+                                                    {pdfParsing ? 'Parsing...' : 'Replace PDF'}
+                                                </label>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-slate-50 border border-slate-200 border-dashed rounded-xl p-6 text-center">
+                                            <input
+                                                type="file"
+                                                accept=".pdf"
+                                                onChange={(e) => handleUpdatePdf(project.id, e)}
+                                                className="hidden"
+                                                id={`pdf-update-${project.id}`}
+                                                disabled={pdfParsing}
+                                            />
+                                            <label
+                                                htmlFor={`pdf-update-${project.id}`}
+                                                className={`mx-auto inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-sm ${
+                                                    pdfParsing ? 'opacity-50 cursor-not-allowed' : ''
+                                                }`}
+                                            >
+                                                <Upload size={14} />
+                                                {pdfParsing ? 'Parsing PDF...' : 'Upload PDF Synopsis'}
+                                            </label>
+                                        </div>
+                                    )}
                                 </div>
                             </Card>
                         )}

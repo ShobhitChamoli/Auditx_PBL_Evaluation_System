@@ -479,6 +479,9 @@ const MentorDashboard = () => {
                                         <Button variant="outline" className="text-sm shadow-sm" onClick={() => window.open(selectedProject.repoLink, '_blank')}>
                                             <Github size={16} className="mr-2" /> Repository
                                         </Button>
+                                        <Button variant="primary" className="text-sm shadow-sm flex items-center gap-2" onClick={() => setVivaMode(true)}>
+                                            <Sparkles size={16} className="text-amber-300 fill-amber-300" /> Start AI Viva
+                                        </Button>
                                         <button
                                             onClick={() => setSelectedProject(null)}
                                             className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100"
